@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"errors"
 	"github.com/sk-pkg/logger"
 	"go.uber.org/zap"
@@ -13,7 +14,9 @@ func main() {
 		log.Fatal(err)
 	}
 
-	loggers.Debug("Debug")
-	loggers.Info("Info", zap.String("info", "value"))
-	loggers.Error("error", zap.Error(errors.New("debug info")))
+	ctx := context.WithValue(context.Background(), logger.TraceIDKey, "123456")
+
+	loggers.Debug(ctx, "Debug")
+	loggers.Info(ctx, "Info", zap.String("info", "value"))
+	loggers.Error(ctx, "error", zap.Error(errors.New("debug info")))
 }
