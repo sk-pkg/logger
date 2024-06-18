@@ -1,6 +1,7 @@
 package logger
 
 import (
+	"context"
 	"github.com/lestrrat-go/file-rotatelogs"
 	"go.uber.org/zap"
 	"go.uber.org/zap/zapcore"
@@ -10,6 +11,22 @@ import (
 const (
 	DefaultDriver = "stdout"
 	DefaultLevel  = zapcore.InfoLevel
+	TraceIDKey    = "trace_id"
+)
+
+type (
+	Option func(*option)
+
+	option struct {
+		driver        string                // 日志驱动 stdout, file
+		level         zapcore.Level         // 日志级别 debug,info,warn,error,fatal
+		logPath       string                // 日志路径，仅当Driver为file时生效
+		encoderConfig zapcore.EncoderConfig // Zap编码配置
+	}
+
+	Manager struct {
+		Zap *zap.Logger
+	}
 )
 
 var DefaultEncoderConfig = zapcore.EncoderConfig{
@@ -24,15 +41,6 @@ var DefaultEncoderConfig = zapcore.EncoderConfig{
 	EncodeTime:     zapcore.ISO8601TimeEncoder,
 	EncodeDuration: zapcore.SecondsDurationEncoder,
 	EncodeCaller:   zapcore.ShortCallerEncoder,
-}
-
-type Option func(*option)
-
-type option struct {
-	driver        string                // 日志驱动 stdout, file
-	level         zapcore.Level         // 日志级别 debug,info,warn,error,fatal
-	logPath       string                // 日志路径，仅当Driver为file时生效
-	encoderConfig zapcore.EncoderConfig // Zap编码配置
 }
 
 func WithDriver(driver string) Option {
@@ -70,7 +78,7 @@ func WithEncoderConfig(config zapcore.EncoderConfig) Option {
 	}
 }
 
-func New(opts ...Option) (*zap.Logger, error) {
+func New(opts ...Option) (*Manager, error) {
 	opt := &option{driver: DefaultDriver, level: DefaultLevel, encoderConfig: DefaultEncoderConfig}
 	for _, f := range opts {
 		f(opt)
@@ -128,8 +136,63 @@ func New(opts ...Option) (*zap.Logger, error) {
 
 	logger := zap.New(core,
 		zap.AddCaller(),
+		zap.AddCallerSkip(1), // 跳过封装函数这一层
 		zap.ErrorOutput(stderr),
 	)
 
-	return logger, nil
+	return &Manager{Zap: logger}, nil
+}
+
+// getTraceIDFromContext 从上下文中提取 TraceID
+func getTraceIDFromContext(ctx context.Context) string {
+	if traceID, ok := ctx.Value(TraceIDKey).(string); ok {
+		return traceID
+	}
+	return ""
+}
+
+func (m *Manager) getLoggerWithTraceID(ctx context.Context) *zap.Logger {
+	traceID := getTraceIDFromContext(ctx)
+	if traceID != "" {
+		return m.Zap.With(zap.String("TraceID", traceID))
+	}
+	return m.Zap
+}
+
+func (m *Manager) Info(ctx context.Context, msg string, fields ...zap.Field) {
+	logger := m.getLoggerWithTraceID(ctx)
+	logger.Info(msg, fields...)
+}
+
+func (m *Manager) Error(ctx context.Context, msg string, fields ...zap.Field) {
+	logger := m.getLoggerWithTraceID(ctx)
+	logger.Error(msg, fields...)
+}
+
+func (m *Manager) Debug(ctx context.Context, msg string, fields ...zap.Field) {
+	logger := m.getLoggerWithTraceID(ctx)
+	logger.Debug(msg, fields...)
+}
+
+func (m *Manager) Warn(ctx context.Context, msg string, fields ...zap.Field) {
+	logger := m.getLoggerWithTraceID(ctx)
+	logger.Warn(msg, fields...)
+}
+
+func (m *Manager) Fatal(ctx context.Context, msg string, fields ...zap.Field) {
+	logger := m.getLoggerWithTraceID(ctx)
+	logger.Fatal(msg, fields...)
+}
+
+func (m *Manager) Panic(ctx context.Context, msg string, fields ...zap.Field) {
+	logger := m.getLoggerWithTraceID(ctx)
+	logger.Panic(msg, fields...)
+}
+
+func (m *Manager) Sync() {
+	m.Zap.Sync()
+}
+
+func (m *Manager) Named(name string) *zap.Logger {
+	return m.Zap.Named(name)
 }
