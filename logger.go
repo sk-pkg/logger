@@ -9,9 +9,10 @@ import (
 )
 
 const (
-	DefaultDriver = "stdout"
-	DefaultLevel  = zapcore.InfoLevel
-	TraceIDKey    = "trace_id"
+	defaultDriver     = "stdout"
+	defaultLevel      = zapcore.InfoLevel
+	defaultCallerSkip = 1
+	TraceIDKey        = "trace_id"
 )
 
 type (
@@ -22,6 +23,7 @@ type (
 		level         zapcore.Level         // 日志级别 debug,info,warn,error,fatal
 		logPath       string                // 日志路径，仅当Driver为file时生效
 		encoderConfig zapcore.EncoderConfig // Zap编码配置
+		callerSkip    int                   // 调用栈跳过的层数
 	}
 
 	Manager struct {
@@ -78,8 +80,14 @@ func WithEncoderConfig(config zapcore.EncoderConfig) Option {
 	}
 }
 
+func WithCallerSkip(skip int) Option {
+	return func(o *option) {
+		o.callerSkip = skip
+	}
+}
+
 func New(opts ...Option) (*Manager, error) {
-	opt := &option{driver: DefaultDriver, level: DefaultLevel, encoderConfig: DefaultEncoderConfig}
+	opt := &option{driver: defaultDriver, level: defaultLevel, encoderConfig: DefaultEncoderConfig, callerSkip: defaultCallerSkip}
 	for _, f := range opts {
 		f(opt)
 	}
@@ -136,7 +144,7 @@ func New(opts ...Option) (*Manager, error) {
 
 	logger := zap.New(core,
 		zap.AddCaller(),
-		zap.AddCallerSkip(1), // 跳过封装函数这一层
+		zap.AddCallerSkip(opt.callerSkip),
 		zap.ErrorOutput(stderr),
 	)
 
@@ -189,8 +197,8 @@ func (m *Manager) Panic(ctx context.Context, msg string, fields ...zap.Field) {
 	logger.Panic(msg, fields...)
 }
 
-func (m *Manager) Sync() {
-	m.Zap.Sync()
+func (m *Manager) Sync() error {
+	return m.Zap.Sync()
 }
 
 func (m *Manager) Named(name string) *zap.Logger {
