@@ -38,21 +38,21 @@ type (
 
 	// option holds the configuration for the logger
 	option struct {
-		driver        string                // Log driver: "stdout" or "file"
-		level         zapcore.Level         // Minimum log level
-		logPath       string                // Path for log files (only used when driver is "file")
-		encoderConfig zapcore.EncoderConfig // Encoder configuration for log formatting
-		callerSkip    int                   // Number of stack frames to skip when logging caller info
-		maxAge        time.Duration         // Maximum age of log files before rotation
-		rotationTime  time.Duration         // Time between log file rotations
-		useColor      bool                  // Whether to use colored output (only for console encoder)
+		driver          string                // Log driver: "stdout" or "file"
+		level           zapcore.Level         // Minimum log level
+		logPath         string                // Path for log files (only used when driver is "file")
+		encoderConfig   zapcore.EncoderConfig // Encoder configuration for log formatting
+		callerSkip      int                   // Number of stack frames to skip when logging caller info
+		maxAge          time.Duration         // Maximum age of log files before rotation
+		rotationTime    time.Duration         // Time between log file rotations
+		useColor        bool                  // Whether to use colored output (only for console encoder)
+		stacktraceLevel zapcore.Level         // Minimum log level for stacktrace
 	}
 
 	// Manager manages the logger instance and provides logging methods
 	Manager struct {
-		Zap        *zap.Logger     // Underlying Zap logger instance
-		level      zap.AtomicLevel // Atomic level for dynamic level changes
-		callerSkip int             // Number of stack frames to skip when logging caller info
+		Zap   *zap.Logger     // Underlying Zap logger instance
+		level zap.AtomicLevel // Atomic level for dynamic level changes
 	}
 )
 
@@ -192,6 +192,36 @@ func WithColor(useColor bool) Option {
 	}
 }
 
+// WithStacktraceLevel sets the minimum log level for stacktrace
+//
+// Parameters:
+//   - level: The minimum log level for stacktrace
+//
+// Returns:
+//   - Option: A function that sets the stacktrace level in the option struct
+func WithStacktraceLevel(level string) Option {
+	return func(o *option) {
+		switch level {
+		case "debug":
+			o.stacktraceLevel = DebugLevel
+		case "info":
+			o.stacktraceLevel = InfoLevel
+		case "warn":
+			o.stacktraceLevel = WarnLevel
+		case "error":
+			o.stacktraceLevel = ErrorLevel
+		case "dpanic":
+			o.stacktraceLevel = DPanicLevel
+		case "panic":
+			o.stacktraceLevel = PanicLevel
+		case "fatal":
+			o.stacktraceLevel = FatalLevel
+		default:
+			panic("invalid log level")
+		}
+	}
+}
+
 // New creates a new logger manager with the given options
 //
 // Parameters:
@@ -260,13 +290,13 @@ func New(opts ...Option) (*Manager, error) {
 		zap.AddCaller(),
 		zap.AddCallerSkip(opt.callerSkip),
 		zap.ErrorOutput(zapcore.AddSync(os.Stderr)),
+		zap.AddStacktrace(opt.stacktraceLevel),
 	)
 
 	// Return new Manager instance
 	return &Manager{
-		Zap:        logger,
-		level:      level,
-		callerSkip: opt.callerSkip,
+		Zap:   logger,
+		level: level,
 	}, nil
 }
 
@@ -352,7 +382,7 @@ func (m *Manager) Info(ctx context.Context, msg string, fields ...zap.Field) {
 //   - fields: Optional fields to add to the log entry
 func (m *Manager) Error(ctx context.Context, msg string, fields ...zap.Field) {
 	logger := m.getLoggerWithTraceID(ctx)
-	logger.Error(msg, append(fields, zap.StackSkip("stacktrace", m.callerSkip+1))...)
+	logger.Error(msg, fields...)
 }
 
 // Debug logs a message at DebugLevel
@@ -385,7 +415,7 @@ func (m *Manager) Warn(ctx context.Context, msg string, fields ...zap.Field) {
 //   - fields: Optional fields to add to the log entry
 func (m *Manager) Fatal(ctx context.Context, msg string, fields ...zap.Field) {
 	logger := m.getLoggerWithTraceID(ctx)
-	logger.Fatal(msg, append(fields, zap.StackSkip("stacktrace", m.callerSkip+1))...)
+	logger.Fatal(msg, fields...)
 }
 
 // Panic logs a message at PanicLevel with a stack trace, then panics
@@ -396,7 +426,7 @@ func (m *Manager) Fatal(ctx context.Context, msg string, fields ...zap.Field) {
 //   - fields: Optional fields to add to the log entry
 func (m *Manager) Panic(ctx context.Context, msg string, fields ...zap.Field) {
 	logger := m.getLoggerWithTraceID(ctx)
-	logger.Panic(msg, append(fields, zap.StackSkip("stacktrace", m.callerSkip+1))...)
+	logger.Panic(msg, fields...)
 }
 
 // Sync flushes any buffered log entries
