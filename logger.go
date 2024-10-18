@@ -26,10 +26,11 @@ const (
 
 // Constants for default configuration
 const (
-	defaultDriver     = "stdout"
-	defaultLevel      = InfoLevel
-	defaultCallerSkip = 1
-	TraceIDKey        = "trace_id"
+	defaultDriver          = "stdout"
+	defaultLevel           = InfoLevel
+	defaultCallerSkip      = 1
+	defaultStacktraceLevel = DPanicLevel
+	TraceIDKey             = "trace_id"
 )
 
 type (
@@ -245,12 +246,13 @@ func WithStacktraceLevel(level string) Option {
 func New(opts ...Option) (*Manager, error) {
 	// Initialize default options
 	opt := &option{
-		driver:        defaultDriver,
-		level:         defaultLevel,
-		encoderConfig: DefaultEncoderConfig,
-		callerSkip:    defaultCallerSkip,
-		maxAge:        7 * 24 * time.Hour,
-		rotationTime:  24 * time.Hour,
+		driver:          defaultDriver,
+		level:           defaultLevel,
+		encoderConfig:   DefaultEncoderConfig,
+		callerSkip:      defaultCallerSkip,
+		maxAge:          7 * 24 * time.Hour,
+		rotationTime:    24 * time.Hour,
+		stacktraceLevel: defaultStacktraceLevel,
 	}
 
 	// Apply provided options
