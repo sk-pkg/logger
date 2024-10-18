@@ -1,36 +1,62 @@
+// Package logger provides a flexible and extensible logging system built on top of Zap.
+// It supports various log levels, file rotation, and context-aware logging with trace IDs.
 package logger
 
 import (
 	"context"
+	"fmt"
+	"os"
+	"time"
+
 	"github.com/lestrrat-go/file-rotatelogs"
 	"go.uber.org/zap"
 	"go.uber.org/zap/zapcore"
-	"os"
 )
 
+// Log levels
+const (
+	DebugLevel zapcore.Level = iota - 1
+	InfoLevel
+	WarnLevel
+	ErrorLevel
+	DPanicLevel
+	PanicLevel
+	FatalLevel
+)
+
+// Constants for default configuration
 const (
 	defaultDriver     = "stdout"
-	defaultLevel      = zapcore.InfoLevel
+	defaultLevel      = InfoLevel
 	defaultCallerSkip = 1
 	TraceIDKey        = "trace_id"
 )
 
 type (
+	// Option is a function that configures the logger options
 	Option func(*option)
 
+	// option holds the configuration for the logger
 	option struct {
-		driver        string                // 日志驱动 stdout, file
-		level         zapcore.Level         // 日志级别 debug,info,warn,error,fatal
-		logPath       string                // 日志路径，仅当Driver为file时生效
-		encoderConfig zapcore.EncoderConfig // Zap编码配置
-		callerSkip    int                   // 调用栈跳过的层数
+		driver        string                // Log driver: "stdout" or "file"
+		level         zapcore.Level         // Minimum log level
+		logPath       string                // Path for log files (only used when driver is "file")
+		encoderConfig zapcore.EncoderConfig // Encoder configuration for log formatting
+		callerSkip    int                   // Number of stack frames to skip when logging caller info
+		maxAge        time.Duration         // Maximum age of log files before rotation
+		rotationTime  time.Duration         // Time between log file rotations
+		useColor      bool                  // Whether to use colored output (only for console encoder)
 	}
 
+	// Manager manages the logger instance and provides logging methods
 	Manager struct {
-		Zap *zap.Logger
+		Zap        *zap.Logger     // Underlying Zap logger instance
+		level      zap.AtomicLevel // Atomic level for dynamic level changes
+		callerSkip int             // Number of stack frames to skip when logging caller info
 	}
 )
 
+// DefaultEncoderConfig is the default encoder configuration for log formatting
 var DefaultEncoderConfig = zapcore.EncoderConfig{
 	TimeKey:        "T",
 	LevelKey:       "L",
@@ -45,113 +71,237 @@ var DefaultEncoderConfig = zapcore.EncoderConfig{
 	EncodeCaller:   zapcore.ShortCallerEncoder,
 }
 
+// WithDriver sets the logger driver
+//
+// Parameters:
+//   - driver: The driver to use ("stdout" or "file")
+//
+// Returns:
+//   - Option: A function that sets the driver in the option struct
 func WithDriver(driver string) Option {
 	return func(o *option) {
 		o.driver = driver
 	}
 }
 
+// WithLevel sets the minimum log level
+//
+// Parameters:
+//   - level: The minimum log level to set
+//
+// Returns:
+//   - Option: A function that sets the level in the option struct
 func WithLevel(level string) Option {
 	return func(o *option) {
 		switch level {
 		case "debug":
-			o.level = zapcore.DebugLevel
-		case "error":
-			o.level = zapcore.ErrorLevel
+			o.level = DebugLevel
+		case "info":
+			o.level = InfoLevel
 		case "warn":
-			o.level = zapcore.WarnLevel
+			o.level = WarnLevel
+		case "error":
+			o.level = ErrorLevel
+		case "dpanic":
+			o.level = DPanicLevel
+		case "panic":
+			o.level = PanicLevel
 		case "fatal":
-			o.level = zapcore.FatalLevel
+			o.level = FatalLevel
 		default:
-			o.level = zapcore.InfoLevel
+			panic("invalid log level")
 		}
 	}
 }
 
+// WithLogPath sets the log file path (only used when driver is "file")
+//
+// Parameters:
+//   - path: The path where log files will be stored
+//
+// Returns:
+//   - Option: A function that sets the log path in the option struct
 func WithLogPath(path string) Option {
 	return func(o *option) {
 		o.logPath = path
 	}
 }
 
+// WithEncoderConfig sets the encoder configuration for log formatting
+//
+// Parameters:
+//   - config: The encoder configuration to use
+//
+// Returns:
+//   - Option: A function that sets the encoder config in the option struct
 func WithEncoderConfig(config zapcore.EncoderConfig) Option {
 	return func(o *option) {
 		o.encoderConfig = config
 	}
 }
 
+// WithCallerSkip sets the number of callers to skip when logging caller info
+//
+// Parameters:
+//   - skip: The number of callers to skip
+//
+// Returns:
+//   - Option: A function that sets the caller skip in the option struct
 func WithCallerSkip(skip int) Option {
 	return func(o *option) {
 		o.callerSkip = skip
 	}
 }
 
+// WithMaxAge sets the maximum age for log files before rotation
+//
+// Parameters:
+//   - maxAge: The maximum age for log files
+//
+// Returns:
+//   - Option: A function that sets the max age in the option struct
+func WithMaxAge(maxAge time.Duration) Option {
+	return func(o *option) {
+		o.maxAge = maxAge
+	}
+}
+
+// WithRotationTime sets the time between log file rotations
+//
+// Parameters:
+//   - rotationTime: The time between log file rotations
+//
+// Returns:
+//   - Option: A function that sets the rotation time in the option struct
+func WithRotationTime(rotationTime time.Duration) Option {
+	return func(o *option) {
+		o.rotationTime = rotationTime
+	}
+}
+
+// WithColor enables or disables colored output (only for console encoder)
+//
+// Parameters:
+//   - useColor: Whether to use colored output
+//
+// Returns:
+//   - Option: A function that sets the color usage in the option struct
+func WithColor(useColor bool) Option {
+	return func(o *option) {
+		o.useColor = useColor
+	}
+}
+
+// New creates a new logger manager with the given options
+//
+// Parameters:
+//   - opts: A variadic list of Option functions to configure the logger
+//
+// Returns:
+//   - *Manager: A new Manager instance
+//   - error: An error if the logger creation fails
+//
+// Example:
+//
+//	logger, err := New(
+//	    WithDriver("file"),
+//	    WithLogPath("/var/log/myapp/"),
+//	    WithLevel(InfoLevel),
+//	    WithColor(true),
+//	)
+//	if err != nil {
+//	    // Handle error
+//	}
 func New(opts ...Option) (*Manager, error) {
-	opt := &option{driver: defaultDriver, level: defaultLevel, encoderConfig: DefaultEncoderConfig, callerSkip: defaultCallerSkip}
+	// Initialize default options
+	opt := &option{
+		driver:        defaultDriver,
+		level:         defaultLevel,
+		encoderConfig: DefaultEncoderConfig,
+		callerSkip:    defaultCallerSkip,
+		maxAge:        7 * 24 * time.Hour,
+		rotationTime:  24 * time.Hour,
+	}
+
+	// Apply provided options
 	for _, f := range opts {
 		f(opt)
 	}
 
-	jsonEncoder := zapcore.NewJSONEncoder(opt.encoderConfig)
+	// Create atomic level for dynamic level changes
+	level := zap.NewAtomicLevelAt(opt.level)
 
-	// lowPriority usd by info\debug\warn
-	lowPriority := zap.LevelEnablerFunc(func(lvl zapcore.Level) bool {
-		return lvl >= opt.level && lvl < zapcore.ErrorLevel
-	})
-
-	// highPriority usd by error\panic\fatal
-	highPriority := zap.LevelEnablerFunc(func(lvl zapcore.Level) bool {
-		return lvl >= opt.level && lvl >= zapcore.ErrorLevel
-	})
-
-	stdout := zapcore.Lock(os.Stdout) // lock for concurrent safe
-	stderr := zapcore.Lock(os.Stderr) // lock for concurrent safe
-
-	core := zapcore.NewTee()
-
-	// 标准输出
-	if opt.driver == "stdout" {
-		core = zapcore.NewTee(
-			zapcore.NewCore(jsonEncoder,
-				zapcore.NewMultiWriteSyncer(stdout),
-				lowPriority,
-			),
-			zapcore.NewCore(jsonEncoder,
-				zapcore.NewMultiWriteSyncer(stderr),
-				highPriority,
-			),
-		)
+	// Create encoder based on color option
+	var encoder zapcore.Encoder
+	if opt.useColor {
+		encoder = zapcore.NewConsoleEncoder(opt.encoderConfig)
+	} else {
+		encoder = zapcore.NewJSONEncoder(opt.encoderConfig)
 	}
 
-	// 日志文件输出
-	if opt.driver == "file" {
-		// 例子：/data/logs/logger/2021-05-17.log
-		hook, err := rotatelogs.New(opt.logPath + "%Y-%m-%d.log")
+	var core zapcore.Core
+	var err error
 
+	// Create core based on driver
+	switch opt.driver {
+	case "stdout":
+		core = zapcore.NewCore(encoder, zapcore.AddSync(os.Stdout), level)
+	case "file":
+		core, err = newFileCore(opt, encoder, level)
 		if err != nil {
-			return nil, err
+			return nil, fmt.Errorf("failed to create file core: %w", err)
 		}
-
-		core = zapcore.NewTee(core,
-			zapcore.NewCore(jsonEncoder,
-				zapcore.AddSync(hook),
-				zap.LevelEnablerFunc(func(lvl zapcore.Level) bool {
-					return lvl >= opt.level
-				}),
-			),
-		)
+	default:
+		return nil, fmt.Errorf("unknown driver: %s", opt.driver)
 	}
 
+	// Create Zap logger
 	logger := zap.New(core,
 		zap.AddCaller(),
 		zap.AddCallerSkip(opt.callerSkip),
-		zap.ErrorOutput(stderr),
+		zap.ErrorOutput(zapcore.AddSync(os.Stderr)),
 	)
 
-	return &Manager{Zap: logger}, nil
+	// Return new Manager instance
+	return &Manager{
+		Zap:        logger,
+		level:      level,
+		callerSkip: opt.callerSkip,
+	}, nil
 }
 
-// getTraceIDFromContext 从上下文中提取 TraceID
+// newFileCore creates a new zapcore.Core for file-based logging
+//
+// Parameters:
+//   - opt: The option struct containing configuration
+//   - encoder: The zapcore.Encoder to use
+//   - level: The zap.AtomicLevel for dynamic level changes
+//
+// Returns:
+//   - zapcore.Core: A new Core for file-based logging
+//   - error: An error if the file core creation fails
+func newFileCore(opt *option, encoder zapcore.Encoder, level zap.AtomicLevel) (zapcore.Core, error) {
+	// Create rotatelogs hook
+	hook, err := rotatelogs.New(
+		opt.logPath+"%Y-%m-%d.log",
+		rotatelogs.WithMaxAge(opt.maxAge),
+		rotatelogs.WithRotationTime(opt.rotationTime),
+	)
+	if err != nil {
+		return nil, err
+	}
+
+	// Create and return new Core
+	return zapcore.NewCore(encoder, zapcore.AddSync(hook), level), nil
+}
+
+// getTraceIDFromContext extracts the TraceID from the context
+//
+// Parameters:
+//   - ctx: The context.Context to extract the TraceID from
+//
+// Returns:
+//   - string: The extracted TraceID, or an empty string if not found
 func getTraceIDFromContext(ctx context.Context) string {
 	if traceID, ok := ctx.Value(TraceIDKey).(string); ok {
 		return traceID
@@ -159,48 +309,122 @@ func getTraceIDFromContext(ctx context.Context) string {
 	return ""
 }
 
+// getLoggerWithTraceID returns a logger with the TraceID field added if present in the context
+//
+// Parameters:
+//   - ctx: The context.Context to extract the TraceID from
+//
+// Returns:
+//   - *zap.Logger: A logger with the TraceID field added if present
 func (m *Manager) getLoggerWithTraceID(ctx context.Context) *zap.Logger {
 	traceID := getTraceIDFromContext(ctx)
-	if traceID != "" {
-		return m.Zap.With(zap.String("TraceID", traceID))
+	if traceID == "" {
+		return m.Zap
 	}
-	return m.Zap
+
+	return m.Zap.With(zap.String("TraceID", traceID))
 }
 
+// SetLevel dynamically changes the log level
+//
+// Parameters:
+//   - level: The new zapcore.Level to set
+func (m *Manager) SetLevel(level zapcore.Level) {
+	m.level.SetLevel(level)
+}
+
+// Info logs a message at InfoLevel
+//
+// Parameters:
+//   - ctx: The context.Context for this log entry
+//   - msg: The message to log
+//   - fields: Optional fields to add to the log entry
 func (m *Manager) Info(ctx context.Context, msg string, fields ...zap.Field) {
 	logger := m.getLoggerWithTraceID(ctx)
 	logger.Info(msg, fields...)
 }
 
+// Error logs a message at ErrorLevel with a stack trace
+//
+// Parameters:
+//   - ctx: The context.Context for this log entry
+//   - msg: The message to log
+//   - fields: Optional fields to add to the log entry
 func (m *Manager) Error(ctx context.Context, msg string, fields ...zap.Field) {
 	logger := m.getLoggerWithTraceID(ctx)
-	logger.Error(msg, fields...)
+	logger.Error(msg, append(fields, zap.StackSkip("stacktrace", m.callerSkip+1))...)
 }
 
+// Debug logs a message at DebugLevel
+//
+// Parameters:
+//   - ctx: The context.Context for this log entry
+//   - msg: The message to log
+//   - fields: Optional fields to add to the log entry
 func (m *Manager) Debug(ctx context.Context, msg string, fields ...zap.Field) {
 	logger := m.getLoggerWithTraceID(ctx)
 	logger.Debug(msg, fields...)
 }
 
+// Warn logs a message at WarnLevel
+//
+// Parameters:
+//   - ctx: The context.Context for this log entry
+//   - msg: The message to log
+//   - fields: Optional fields to add to the log entry
 func (m *Manager) Warn(ctx context.Context, msg string, fields ...zap.Field) {
 	logger := m.getLoggerWithTraceID(ctx)
 	logger.Warn(msg, fields...)
 }
 
+// Fatal logs a message at FatalLevel with a stack trace, then calls os.Exit(1)
+//
+// Parameters:
+//   - ctx: The context.Context for this log entry
+//   - msg: The message to log
+//   - fields: Optional fields to add to the log entry
 func (m *Manager) Fatal(ctx context.Context, msg string, fields ...zap.Field) {
 	logger := m.getLoggerWithTraceID(ctx)
-	logger.Fatal(msg, fields...)
+	logger.Fatal(msg, append(fields, zap.StackSkip("stacktrace", m.callerSkip+1))...)
 }
 
+// Panic logs a message at PanicLevel with a stack trace, then panics
+//
+// Parameters:
+//   - ctx: The context.Context for this log entry
+//   - msg: The message to log
+//   - fields: Optional fields to add to the log entry
 func (m *Manager) Panic(ctx context.Context, msg string, fields ...zap.Field) {
 	logger := m.getLoggerWithTraceID(ctx)
-	logger.Panic(msg, fields...)
+	logger.Panic(msg, append(fields, zap.StackSkip("stacktrace", m.callerSkip+1))...)
 }
 
+// Sync flushes any buffered log entries
+//
+// Returns:
+//   - error: An error if the sync operation fails
 func (m *Manager) Sync() error {
 	return m.Zap.Sync()
 }
 
+// Named adds a sub-scope to the logger's name
+//
+// Parameters:
+//   - name: The name to add to the logger
+//
+// Returns:
+//   - *zap.Logger: A new logger with the given name added
 func (m *Manager) Named(name string) *zap.Logger {
 	return m.Zap.Named(name)
+}
+
+// With creates a child logger and adds structured context to it
+//
+// Parameters:
+//   - fields: The fields to add to the logger
+//
+// Returns:
+//   - *zap.Logger: A new logger with the given fields added
+func (m *Manager) With(fields ...zap.Field) *zap.Logger {
+	return m.Zap.With(fields...)
 }
