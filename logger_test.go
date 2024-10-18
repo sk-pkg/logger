@@ -1,118 +1,121 @@
-package logger_test
+package logger
 
 import (
-	"bytes"
 	"context"
-	"encoding/json"
-	"github.com/sk-pkg/logger"
-	"testing"
-
 	"github.com/stretchr/testify/assert"
 	"go.uber.org/zap"
 	"go.uber.org/zap/zapcore"
+	"go.uber.org/zap/zaptest/observer"
+	"testing"
 )
 
 func TestNew(t *testing.T) {
-	// Test creating a new logger manager with default options
-	mgr, err := logger.New()
-	assert.NoError(t, err)
-	assert.NotNil(t, mgr)
-
-	// Test creating a new logger manager with custom options
-	mgr, err = logger.New(
-		logger.WithDriver("file"),
-		logger.WithLogPath("/tmp/test-log-"),
-		logger.WithLevel("debug"),
-	)
-	assert.NoError(t, err)
-	assert.NotNil(t, mgr)
-}
-
-func TestLoggingWithTraceID(t *testing.T) {
-	var buf bytes.Buffer
-	writer := zapcore.AddSync(&buf)
-
-	encoderConfig := zapcore.EncoderConfig{
-		TimeKey:        "T",
-		LevelKey:       "L",
-		NameKey:        "N",
-		CallerKey:      "C",
-		MessageKey:     "M",
-		StacktraceKey:  "S",
-		LineEnding:     zapcore.DefaultLineEnding,
-		EncodeLevel:    zapcore.CapitalLevelEncoder,
-		EncodeTime:     zapcore.ISO8601TimeEncoder,
-		EncodeDuration: zapcore.SecondsDurationEncoder,
-		EncodeCaller:   zapcore.ShortCallerEncoder,
+	tests := []struct {
+		name    string
+		opts    []Option
+		wantErr bool
+	}{
+		{
+			name: "Default options",
+			opts: []Option{},
+		},
+		{
+			name: "Custom options",
+			opts: []Option{
+				WithDriver("stdout"),
+				WithLevel("info"),
+				WithColor(true),
+			},
+		},
+		{
+			name: "Invalid driver",
+			opts: []Option{
+				WithDriver("invalid"),
+			},
+			wantErr: true,
+		},
 	}
 
-	core := zapcore.NewCore(
-		zapcore.NewJSONEncoder(encoderConfig),
-		writer,
-		zapcore.DebugLevel,
-	)
-
-	zapLogger := zap.New(core)
-	mgr := &logger.Manager{Zap: zapLogger}
-
-	ctx := context.WithValue(context.Background(), logger.TraceIDKey, "test-trace-id")
-
-	// Test Info level logging
-	mgr.Info(ctx, "This is an info message")
-
-	// Flush and sync the buffer
-	mgr.Sync()
-
-	var loggedMessage map[string]interface{}
-	err := json.Unmarshal(buf.Bytes(), &loggedMessage)
-	assert.NoError(t, err)
-
-	assert.Equal(t, "INFO", loggedMessage["L"])
-	assert.Equal(t, "This is an info message", loggedMessage["M"])
-	assert.Equal(t, "test-trace-id", loggedMessage["TraceID"])
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := New(tt.opts...)
+			if tt.wantErr {
+				assert.Error(t, err)
+			} else {
+				assert.NoError(t, err)
+				assert.NotNil(t, got)
+			}
+		})
+	}
 }
 
-func TestLoggingLevels(t *testing.T) {
-	var buf bytes.Buffer
-	writer := zapcore.AddSync(&buf)
-
-	encoderConfig := zapcore.EncoderConfig{
-		TimeKey:        "T",
-		LevelKey:       "L",
-		NameKey:        "N",
-		CallerKey:      "C",
-		MessageKey:     "M",
-		StacktraceKey:  "S",
-		LineEnding:     zapcore.DefaultLineEnding,
-		EncodeLevel:    zapcore.CapitalLevelEncoder,
-		EncodeTime:     zapcore.ISO8601TimeEncoder,
-		EncodeDuration: zapcore.SecondsDurationEncoder,
-		EncodeCaller:   zapcore.ShortCallerEncoder,
+func TestManager_LogLevels(t *testing.T) {
+	core, recorded := observer.New(zapcore.WarnLevel)
+	logger := &Manager{
+		Zap: zap.New(core),
 	}
 
-	core := zapcore.NewCore(
-		zapcore.NewConsoleEncoder(encoderConfig),
-		writer,
-		zapcore.DebugLevel,
-	)
+	ctx := context.Background()
 
-	zapLogger := zap.New(core)
-	mgr := &logger.Manager{Zap: zapLogger}
+	tests := []struct {
+		name     string
+		logFunc  func(context.Context, string, ...zap.Field)
+		message  string
+		wantLogs int
+	}{
+		{"Info", logger.Info, "info message", 0},
+		{"Debug", logger.Debug, "debug message", 0},
+		{"Warn", logger.Warn, "warn message", 1},
+		{"Error", logger.Error, "error message", 2},
+	}
 
-	ctx := context.WithValue(context.Background(), logger.TraceIDKey, "test-trace-id")
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			tt.logFunc(ctx, tt.message)
+			assert.Equal(t, tt.wantLogs, recorded.Len())
+			if tt.wantLogs > 0 {
+				assert.Equal(t, tt.message, recorded.All()[recorded.Len()-1].Message)
+			}
+		})
+	}
+}
 
-	// Test all level logging
-	mgr.Info(ctx, "This is an info message")
-	mgr.Error(ctx, "This is an error message")
-	mgr.Debug(ctx, "This is a debug message")
-	mgr.Warn(ctx, "This is a warn message")
+func TestManager_WithTraceID(t *testing.T) {
+	core, recorded := observer.New(zapcore.InfoLevel)
+	logger := &Manager{
+		Zap: zap.New(core),
+	}
 
-	// Capture and assert the logs
-	mgr.Sync()
+	ctx := context.WithValue(context.Background(), TraceIDKey, "test-trace-id")
+	logger.Info(ctx, "message with trace id")
 
-	logs := buf.String()
-	assert.Contains(t, logs, "INFO")
-	assert.Contains(t, logs, "ERROR")
-	assert.Contains(t, logs, "DEBUG")
-	assert.Contains(t, logs, "WARN")
+	assert.Equal(t, 1, recorded.Len())
+	assert.Equal(t, "test-trace-id", recorded.All()[0].ContextMap()["TraceID"])
+}
+
+func TestManager_SetLevel(t *testing.T) {
+	logger, err := New()
+	assert.NoError(t, err)
+
+	logger.SetLevel(zapcore.DebugLevel)
+	assert.Equal(t, zapcore.DebugLevel, logger.level.Level())
+
+	logger.SetLevel(zapcore.ErrorLevel)
+	assert.Equal(t, zapcore.ErrorLevel, logger.level.Level())
+}
+
+func TestManager_Named(t *testing.T) {
+	logger, err := New()
+	assert.NoError(t, err)
+
+	named := logger.Named("test")
+	assert.NotNil(t, named)
+}
+
+func TestManager_With(t *testing.T) {
+	logger, err := New()
+	assert.NoError(t, err)
+
+	with := logger.With(zap.String("key", "value"))
+	assert.NotNil(t, with)
 }
