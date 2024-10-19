@@ -52,8 +52,9 @@ type (
 
 	// Manager manages the logger instance and provides logging methods
 	Manager struct {
-		Zap   *zap.Logger     // Underlying Zap logger instance
-		level zap.AtomicLevel // Atomic level for dynamic level changes
+		Zap        *zap.Logger     // Underlying Zap logger instance
+		level      zap.AtomicLevel // Atomic level for dynamic level changes
+		callerSkip CallerSkip      // Number of stack frames to skip when logging caller info
 	}
 )
 
@@ -290,15 +291,15 @@ func New(opts ...Option) (*Manager, error) {
 	// Create Zap logger
 	logger := zap.New(core,
 		zap.AddCaller(),
-		zap.AddCallerSkip(opt.callerSkip),
 		zap.ErrorOutput(zapcore.AddSync(os.Stderr)),
 		zap.AddStacktrace(opt.stacktraceLevel),
 	)
 
 	// Return new Manager instance
 	return &Manager{
-		Zap:   logger,
-		level: level,
+		Zap:        logger,
+		level:      level,
+		callerSkip: NewCallerSkip(opt.callerSkip),
 	}, nil
 }
 
@@ -349,12 +350,13 @@ func getTraceIDFromContext(ctx context.Context) string {
 // Returns:
 //   - *zap.Logger: A logger with the TraceID field added if present
 func (m *Manager) getLoggerWithTraceID(ctx context.Context) *zap.Logger {
+	logger := m.Zap.WithOptions(zap.AddCallerSkip(m.callerSkip.Load()))
 	traceID := getTraceIDFromContext(ctx)
 	if traceID == "" {
-		return m.Zap
+		return logger
 	}
 
-	return m.Zap.With(zap.String("TraceID", traceID))
+	return logger.With(zap.String("TraceID", traceID))
 }
 
 // SetLevel dynamically changes the log level
@@ -363,6 +365,14 @@ func (m *Manager) getLoggerWithTraceID(ctx context.Context) *zap.Logger {
 //   - level: The new zapcore.Level to set
 func (m *Manager) SetLevel(level zapcore.Level) {
 	m.level.SetLevel(level)
+}
+
+// SetCallerSkip sets the number of callers to skip when logging
+//
+// Parameters:
+//   - skip: The number of callers to skip when logging
+func (m *Manager) SetCallerSkip(skip int) {
+	m.callerSkip.Set(skip)
 }
 
 // Info logs a message at InfoLevel
