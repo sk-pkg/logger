@@ -328,6 +328,20 @@ func newFileCore(opt *option, encoder zapcore.Encoder, level zap.AtomicLevel) (z
 	return zapcore.NewCore(encoder, zapcore.AddSync(hook), level), nil
 }
 
+// CallerSkipMode returns a new Manager with the given caller skip mode
+//
+// Parameters:
+//   - skip: The caller skip mode to apply
+//
+// Returns:
+//   - *Manager: A new Manager with the specified caller skip mode
+func (m *Manager) CallerSkipMode(skip int) *Manager {
+	newManager := *m
+	newManager.callerSkip = NewCallerSkip(skip)
+
+	return &newManager
+}
+
 // getTraceIDFromContext extracts the TraceID from the context
 //
 // Parameters:
