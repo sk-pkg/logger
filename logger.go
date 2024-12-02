@@ -466,21 +466,25 @@ func (m *Manager) Sync() error {
 // Named adds a sub-scope to the logger's name
 //
 // Parameters:
+//   - ctx: The context.Context for this log entry
 //   - name: The name to add to the logger
 //
 // Returns:
 //   - *zap.Logger: A new logger with the given name added
-func (m *Manager) Named(name string) *zap.Logger {
-	return m.Zap.Named(name)
+func (m *Manager) Named(ctx context.Context, name string) *zap.Logger {
+	logger := m.getLoggerWithTraceID(ctx)
+	return logger.Named(name)
 }
 
 // With creates a child logger and adds structured context to it
 //
 // Parameters:
+//   - ctx: The context.Context for this log entry
 //   - fields: The fields to add to the logger
 //
 // Returns:
 //   - *zap.Logger: A new logger with the given fields added
-func (m *Manager) With(fields ...zap.Field) *zap.Logger {
-	return m.Zap.With(fields...)
+func (m *Manager) With(ctx context.Context, fields ...zap.Field) *zap.Logger {
+	logger := m.getLoggerWithTraceID(ctx)
+	return logger.With(fields...)
 }
