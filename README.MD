@@ -1,8 +1,11 @@
 # Logger
 
-Logger is a comprehensive logging package built on top of the zap logger, offering enhanced functionality and ease of use for Go applications.
+## Introduction
+
+logger is a comprehensive logging package built on top of Zap, offering enhanced functionality and ease of use for Go applications. It supports multiple log levels, file rotation, and context-aware logging with trace IDs.
 
 ## Features
+
 - Supports both standard output and file-based logging
 - Includes TraceID support for improved log tracing
 - Configurable log levels, drivers, and encoder settings
@@ -11,12 +14,14 @@ Logger is a comprehensive logging package built on top of the zap logger, offeri
 - Colored output option for console logging
 
 ## Installation
-```shell
+
+```bash
 go get -u "github.com/sk-pkg/logger"
 ```
 
 ## Quick Start
-Here's a basic example to get you started:
+
+Here's a basic example:
 
 ```go
 package main
@@ -43,38 +48,49 @@ func main() {
 
 ## Configuration Options
 
-The `New` function accepts various options to customize the logger:
-
 ### Log Driver
-```go
-loggerManager, err := logger.New(logger.WithDriver("file"))
-```
-Options: `"stdout"` (default) or `"file"`
 
-### Log Path
-When using the `file` driver:
 ```go
 loggerManager, err := logger.New(
-    logger.WithDriver("file"),
-    logger.WithLogPath("/data/logs/")
+    logger.WithDriver("file"), // or "stdout"
 )
 ```
 
 ### Log Level
-```go
-loggerManager, err := logger.New(logger.WithLevel(logger.DebugLevel))
-```
-Options: `DebugLevel`, `InfoLevel`, `WarnLevel`, `ErrorLevel`, `FatalLevel`
 
-### Zap Encoder Configuration
+```go
+loggerManager, err := logger.New(
+    logger.WithLevel(logger.DebugLevel), // or InfoLevel, WarnLevel, ErrorLevel, DPanicLevel, PanicLevel, FatalLevel
+)
+```
+
+Or using string:
+
+```go
+loggerManager, err := logger.New(
+    logger.WithLevel("debug"), // or "info", "warn", "error", "dpanic", "panic", "fatal"
+)
+```
+
+### Log File Path (only when driver is "file")
+
+```go
+loggerManager, err := logger.New(
+    logger.WithDriver("file"),
+    logger.WithLogPath("/data/logs/"),
+)
+```
+
+### Custom Encoder Configuration
+
 ```go
 customEncoderConfig := zapcore.EncoderConfig{
-    TimeKey:        "T",
-    LevelKey:       "L",
-    NameKey:        "N",
-    MessageKey:     "M",
-    CallerKey:      "C",
-    StacktraceKey:  "S",
+    TimeKey:        "timestamp",
+    LevelKey:       "level",
+    NameKey:        "logger",
+    CallerKey:      "caller",
+    MessageKey:     "message",
+    StacktraceKey:  "stacktrace",
     LineEnding:     zapcore.DefaultLineEnding,
     EncodeLevel:    zapcore.CapitalLevelEncoder,
     EncodeTime:     zapcore.ISO8601TimeEncoder,
@@ -82,10 +98,13 @@ customEncoderConfig := zapcore.EncoderConfig{
     EncodeCaller:   zapcore.ShortCallerEncoder,
 }
 
-loggerManager, err := logger.New(logger.WithEncoderConfig(customEncoderConfig))
+loggerManager, err := logger.New(
+    logger.WithEncoderConfig(customEncoderConfig),
+)
 ```
 
 ### Maximum Age for Log Files
+
 ```go
 loggerManager, err := logger.New(
     logger.WithDriver("file"),
@@ -93,7 +112,8 @@ loggerManager, err := logger.New(
 )
 ```
 
-### Log File Rotation
+### Log Rotation Time
+
 ```go
 loggerManager, err := logger.New(
     logger.WithDriver("file"),
@@ -101,15 +121,31 @@ loggerManager, err := logger.New(
 )
 ```
 
-### Colored Output
+### Colored Output (for console only)
+
 ```go
 loggerManager, err := logger.New(
-    logger.WithDriver("stdout"),
-    logger.WithColor(true) // Enable colored output
+    logger.WithColor(true),
 )
 ```
 
-## Logger Methods
+### Stacktrace Level
+
+```go
+loggerManager, err := logger.New(
+    logger.WithStacktraceLevel("error"), // or "debug", "info", "warn", "dpanic", "panic", "fatal"
+)
+```
+
+### Caller Skip Setting
+
+```go
+loggerManager, err := logger.New(
+    logger.WithCallerSkip(1), // default is 1
+)
+```
+
+## Logging Methods
 
 The `LoggerManager` provides the following logging methods:
 
@@ -118,19 +154,45 @@ The `LoggerManager` provides the following logging methods:
 - `Warn(ctx context.Context, msg string, fields ...zap.Field)`
 - `Error(ctx context.Context, msg string, fields ...zap.Field)`
 - `Fatal(ctx context.Context, msg string, fields ...zap.Field)`
+- `Panic(ctx context.Context, msg string, fields ...zap.Field)`
 
 Each method accepts a context (for TraceID), a message string, and optional zap.Field values for additional structured logging.
 
-## TraceID Integration
+## Additional Methods
 
-Include TraceID in log entries by setting it in the context:
+### Dynamic Level Change
 
 ```go
-ctx := context.WithValue(context.Background(), logger.TraceIDKey, "unique-trace-id")
-loggerManager.Info(ctx, "Log message with TraceID")
+loggerManager.SetLevel(zapcore.DebugLevel)
 ```
 
-## Full Example
+### Set Caller Skip
+
+```go
+loggerManager.SetCallerSkip(2)
+```
+
+### Named Logger
+
+```go
+namedLogger := loggerManager.Named(ctx, "subsystem")
+namedLogger.Info("This is a message from a named logger")
+```
+
+### Add Structured Context
+
+```go
+withLogger := loggerManager.With(ctx, zap.String("user", "john"))
+withLogger.Info("This is a message with additional fields")
+```
+
+### Sync Buffered Log Entries
+
+```go
+err := loggerManager.Sync()
+```
+
+## Complete Example
 
 Here's a comprehensive example showcasing all features:
 
@@ -197,5 +259,14 @@ func main() {
 5. Enable colored output for console logging to improve readability during development.
 6. Remember to call `Sync()` on the logger manager before your program exits.
 
+## Performance Considerations
+
+The logging package has been benchmarked to ensure high performance. Consider the following when logging large volumes:
+
+1. Set appropriate log levels, avoiding Debug level in production.
+2. Use structured fields instead of string concatenation.
+3. Consider using `zap.Field` instead of direct string formatting in high-performance scenarios.
+
 ## Reference Documentation
+
 For more detailed information about the underlying zap logger, refer to the [Zap Native Documentation](https://pkg.go.dev/go.uber.org/zap#section-documentation-index).
