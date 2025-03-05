@@ -108,7 +108,8 @@ func TestManager_Named(t *testing.T) {
 	logger, err := New()
 	assert.NoError(t, err)
 
-	named := logger.Named("test")
+	ctx := context.Background()
+	named := logger.Named(ctx, "test")
 	assert.NotNil(t, named)
 }
 
@@ -116,6 +117,7 @@ func TestManager_With(t *testing.T) {
 	logger, err := New()
 	assert.NoError(t, err)
 
-	with := logger.With(zap.String("key", "value"))
+	ctx := context.Background()
+	with := logger.With(ctx, zap.String("key", "value"))
 	assert.NotNil(t, with)
 }
